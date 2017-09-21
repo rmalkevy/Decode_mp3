@@ -107,6 +107,31 @@ static void cleanup(void)
   if (!quiet) fprintf(stderr, "\n");
 }
 
+#define sigmaPsi    1
+#define sigmaEta    40.0
+#define sigmaPsi2   1.0
+#define sigmaEta2   1600.0
+#define sigmaEP2sum (sigmaPsi2 + sigmaEta2)
+#include <math.h>
+
+static double eOpt[2];
+static double xOpt[2];
+static unsigned int ikj = 0;
+
+double filterKalman(short int nextNum)
+{
+    ikj++;
+    eOpt[1] = sqrt(sigmaEta2 * (eOpt[0] * eOpt[0] + sigmaPsi2) /
+                           (eOpt[0] * eOpt[0] + sigmaEP2sum));
+
+    double K = (eOpt[1] * eOpt[1]) / sigmaEta2;
+
+    xOpt[1] = (xOpt[0] + 0.1 * ikj) * (1 - K) + K + nextNum;
+    xOpt[0] = xOpt[1];
+    eOpt[0] = eOpt[1];
+    return xOpt[1];
+}
+
 int main(int argc, char **argv)
 {
   int r; time_t t;
@@ -186,16 +211,19 @@ int main(int argc, char **argv)
   r = mp3dec_decode(mpa, buffer, bufsize, &bufused);
 
   int fd;
-  fd = open("file.wav", O_CREAT | O_WRONLY | O_APPEND, S_IREAD | S_IWRITE);
+  fd = open("file.txt", O_CREAT | O_WRONLY | O_APPEND, S_IREAD | S_IWRITE);
   if (fd < 0)
   {
     printf("error exit");
     exit(1);
   }
-    int32_t *a;
-    int32_t aleft;
-    int32_t aright;
+    unsigned int *a;
+    short int aleft;
+    short int aright;
     char str[12];
+    char cmd = 1;
+    eOpt[0] = sigmaEta;
+    
   while ((r == MP3DEC_RETCODE_OK) && bufused) {
     int i;
 
@@ -204,35 +232,33 @@ int main(int argc, char **argv)
     progress += bufused;
     if (!quiet) fprintf(stderr, "\rDecoding... %d%%", (int)(100*progress/maxsize));
     r = mp3dec_decode(mpa, buffer, bufsize, &bufused);
-      /* jk =0;
-       * for(ik=0;ik<bufused;ik+=2)
-       * {
-       *    wr_buff[jk] = buffer[ik+1]<<16 | buffer[ik];
-       *    string[jk] = str(wbr_buf[jk++]);
-       * }
-       *
-       */
 
-      a = (int32_t*)buffer;
-      for (i = 0; i < bufused; i++)
+
+
+
+      a = (unsigned int*)buffer;
+      double kalman;
+
+      if(cmd == 1){xOpt[0] = (a[0] >> 16);cmd = 0;}
+
+      for (i = 1; i < bufused / 4; i++)
       {
-          aleft = a[i] >> 16;
-          sprintf(str, "%012d", aleft);
+          aleft = (a[i] >> 16);
+
+          sprintf(str, "%d", aleft);
           write(fd, str, sizeof(str));
           memset(str, 0, sizeof(str));
 
           write(fd, "|", 1);
 
-          aright = a[i] << 16;
-          sprintf(str, "%012d", aleft);
+          kalman = filterKalman(aleft);
+          sprintf(str, "%d", (signed int)kalman);
           write(fd, str, sizeof(str));
           memset(str, 0, sizeof(str));
 
           write(fd, "\n", 1);
-
-//          write(fd, buffer, sizeof(buffer));
       }
-      //write(fd, buffer, sizeof(buffer));
+
     sleep(1);
   }
 
